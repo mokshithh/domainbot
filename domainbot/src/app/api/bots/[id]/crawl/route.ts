@@ -62,6 +62,7 @@ export async function POST(
         continue;
       }
 
+      // 🔹 OPTION 3 — Add metadata into embeddings
       const enrichedText = `
 Page Title: ${page.title || "Untitled"}
 Page URL: ${page.url}
@@ -69,7 +70,8 @@ Page URL: ${page.url}
 ${page.cleanedText}
 `;
 
-const chunkCount = await embedAndStorePage(id, inserted.id, enrichedText);
+      const chunkCount = await embedAndStorePage(id, inserted.id, enrichedText);
+
       if (chunkCount > 0) {
         storedPages++;
         totalChunks += chunkCount;
