@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     const { data: chunks, error: chunkErr } = await db.rpc("match_chunks", {
       query_embedding: queryEmbedding,
       match_bot_id: bot.id,
-      match_count: 5,
+      match_count: 8,
     }) as { data: MatchedChunk[] | null; error: unknown };
 
     if (chunkErr || !chunks || chunks.length === 0) {
