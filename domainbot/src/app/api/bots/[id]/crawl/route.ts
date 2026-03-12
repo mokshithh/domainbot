@@ -62,8 +62,14 @@ export async function POST(
         continue;
       }
 
-      const chunkCount = await embedAndStorePage(id, inserted.id, page.cleanedText);
+      const enrichedText = `
+Page Title: ${page.title || "Untitled"}
+Page URL: ${page.url}
 
+${page.cleanedText}
+`;
+
+const chunkCount = await embedAndStorePage(id, inserted.id, enrichedText);
       if (chunkCount > 0) {
         storedPages++;
         totalChunks += chunkCount;
