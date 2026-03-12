@@ -10,7 +10,7 @@ export interface CrawledPage {
 }
 
 const SKIP_EXTENSIONS = /\.(css|js|png|jpg|jpeg|gif|svg|webp|ico|pdf|zip|woff|woff2|ttf|eot|mp4|mp3|xml|json)(\?.*)?$/i;
-const MAX_PAGES = 1;
+const MAX_PAGES = 5;
 const FETCH_TIMEOUT_MS = 8000;
 
 function normalizeUrl(raw: string): string {
