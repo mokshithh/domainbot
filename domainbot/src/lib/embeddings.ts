@@ -21,6 +21,10 @@ export function chunkText(text: string): string[] {
   return chunks;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Generate embeddings for all chunks of a page and store them in Supabase */
 export async function embedAndStorePage(
   botId: string,
@@ -33,17 +37,26 @@ export async function embedAndStorePage(
   // Delete existing chunks for this page
   await db.from("chunks").delete().eq("page_id", pageId);
 
-  const BATCH_SIZE = 5;
-  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-    const batch = chunks.slice(i, i + BATCH_SIZE);
+  const rows: Array<{
+    bot_id: string;
+    page_id: string;
+    chunk_text: string;
+    embedding: number[];
+  }> = [];
 
-    const rows = await Promise.all(
-      batch.map(async (chunk_text) => {
-        const embedding = await getEmbedding(chunk_text);
-        return { bot_id: botId, page_id: pageId, chunk_text, embedding };
-      })
-    );
+  for (const chunk_text of chunks) {
+    try {
+      const embedding = await getEmbedding(chunk_text);
+      rows.push({ bot_id: botId, page_id: pageId, chunk_text, embedding });
 
+      // small delay to avoid Jina free-tier rate/concurrency limits
+      await sleep(700);
+    } catch (error) {
+      console.error("Error generating embedding for chunk:", error);
+    }
+  }
+
+  if (rows.length > 0) {
     const { error } = await db.from("chunks").insert(rows);
     if (error) {
       console.error("Error inserting chunks:", error);
