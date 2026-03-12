@@ -1,8 +1,8 @@
 import { getServiceSupabase } from "./supabase";
 import { getEmbedding } from "./openai";
 
-const CHUNK_SIZE = 500; // characters
-const CHUNK_OVERLAP = 50;
+const CHUNK_SIZE = 1200; // characters
+const CHUNK_OVERLAP = 150;
 
 /** Split text into overlapping chunks */
 export function chunkText(text: string): string[] {
