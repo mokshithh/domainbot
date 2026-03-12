@@ -12,9 +12,11 @@ export function chunkText(text: string): string[] {
   while (start < text.length) {
     const end = Math.min(start + CHUNK_SIZE, text.length);
     const chunk = text.slice(start, end).trim();
+
     if (chunk.length > 50) {
       chunks.push(chunk);
     }
+
     start += CHUNK_SIZE - CHUNK_OVERLAP;
   }
 
@@ -25,41 +27,61 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function toPgVector(values: number[]): string {
+  return `[${values.join(",")}]`;
+}
+
 /** Generate embeddings for all chunks of a page and store them in Supabase */
 export async function embedAndStorePage(
   botId: string,
   pageId: string,
   text: string
-): Promise<void> {
+): Promise<number> {
   const db = getServiceSupabase();
   const chunks = chunkText(text);
 
-  // Delete existing chunks for this page
-  await db.from("chunks").delete().eq("page_id", pageId);
+  if (chunks.length === 0) {
+    throw new Error("No valid chunks generated from page text.");
+  }
 
-  const rows: Array<{
-    bot_id: string;
-    page_id: string;
-    chunk_text: string;
-    embedding: number[];
-  }> = [];
+  // Delete old chunks for this page
+  const { error: deleteErr } = await db.from("chunks").delete().eq("page_id", pageId);
+  if (deleteErr) {
+    throw new Error(`Failed deleting old chunks: ${deleteErr.message}`);
+  }
+
+  let insertedCount = 0;
 
   for (const chunk_text of chunks) {
     try {
       const embedding = await getEmbedding(chunk_text);
-      rows.push({ bot_id: botId, page_id: pageId, chunk_text, embedding });
 
-      // small delay to avoid Jina free-tier rate/concurrency limits
-      await sleep(700);
+      const row = {
+        bot_id: botId,
+        page_id: pageId,
+        chunk_text,
+        embedding: toPgVector(embedding), // important for pgvector
+      };
+
+      const { error: insertErr } = await db.from("chunks").insert(row);
+
+      if (insertErr) {
+        throw new Error(`Chunk insert failed: ${insertErr.message}`);
+      }
+
+      insertedCount++;
+
+      // slow down for Jina free tier
+      await sleep(900);
     } catch (error) {
-      console.error("Error generating embedding for chunk:", error);
+      console.error("Embedding/chunk insert error:", error);
+      throw error;
     }
   }
 
-  if (rows.length > 0) {
-    const { error } = await db.from("chunks").insert(rows);
-    if (error) {
-      console.error("Error inserting chunks:", error);
-    }
+  if (insertedCount === 0) {
+    throw new Error("No chunks were inserted for this page.");
   }
+
+  return insertedCount;
 }
