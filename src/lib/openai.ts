@@ -29,9 +29,7 @@ export async function getEmbedding(text: string): Promise<number[]> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "models/text-embedding-004",
       content: { parts: [{ text: text.replace(/\n/g, " ") }] },
-      outputDimensionality: 1024,
     }),
   });
 
