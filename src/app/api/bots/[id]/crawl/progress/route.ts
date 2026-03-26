@@ -22,17 +22,35 @@ export async function GET(
 
   const encoder = new TextEncoder();
 
+  let cancelled = false;
+  let interval: ReturnType<typeof setInterval>;
+
   const stream = new ReadableStream({
     async start(controller) {
       const send = (data: object) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        if (cancelled) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          // Controller already closed (client disconnected)
+          cancelled = true;
+          clearInterval(interval);
+        }
+      };
+
+      const close = () => {
+        if (cancelled) return;
+        cancelled = true;
+        clearInterval(interval);
+        try { controller.close(); } catch { /* already closed */ }
       };
 
       // Poll for progress updates
       let ticks = 0;
       const maxTicks = 300; // 5 minutes max
 
-      const interval = setInterval(async () => {
+      interval = setInterval(async () => {
+        if (cancelled) return;
         ticks++;
 
         // Check in-memory progress first
@@ -41,8 +59,7 @@ export async function GET(
         if (progress) {
           send(progress);
           if (progress.status === "done" || progress.status === "error") {
-            clearInterval(interval);
-            controller.close();
+            close();
             return;
           }
         } else {
@@ -61,15 +78,13 @@ export async function GET(
               currentUrl: "",
               status: "done",
             });
-            clearInterval(interval);
-            controller.close();
+            close();
             return;
           }
 
           if (freshBot?.status === "error") {
             send({ pagesFound: 0, pagesCrawled: 0, pageFailed: 0, currentUrl: "", status: "error" });
-            clearInterval(interval);
-            controller.close();
+            close();
             return;
           }
 
@@ -78,10 +93,13 @@ export async function GET(
         }
 
         if (ticks >= maxTicks) {
-          clearInterval(interval);
-          controller.close();
+          close();
         }
       }, 1000);
+    },
+    cancel() {
+      cancelled = true;
+      clearInterval(interval);
     },
   });
 

@@ -77,7 +77,7 @@ export default function Sidebar({ onNavClick }: SidebarProps) {
         </Link>
         <p className="mt-3 flex items-center gap-1.5 px-1 text-xs text-white/25">
           <Zap size={11} />
-          Powered by Groq + Jina AI
+          Powered by Groq + Gemini
         </p>
       </div>
     </aside>
