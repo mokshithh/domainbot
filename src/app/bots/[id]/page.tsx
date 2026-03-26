@@ -99,10 +99,7 @@ export default async function BotDetailPage({ params }: Props) {
             </InfoRow>
 
             <InfoRow label="Chats Today">
-              <span className="flex items-center gap-1.5 text-sm font-semibold text-white">
-                <MessageSquare size={12} className="text-white/30" />
-                {bot.daily_chat_count} / {bot.daily_chat_limit}
-              </span>
+              <ChatUsageBar used={bot.daily_chat_count} limit={bot.daily_chat_limit} />
             </InfoRow>
           </div>
 
@@ -234,6 +231,29 @@ export default async function BotDetailPage({ params }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ChatUsageBar({ used, limit }: { used: number; limit: number }) {
+  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
+  const color =
+    pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-400" : "bg-emerald-400";
+  const textColor =
+    pct >= 90 ? "text-red-400" : pct >= 70 ? "text-amber-400" : "text-emerald-400";
+
+  return (
+    <div className="flex flex-col items-end gap-1 min-w-[110px]">
+      <span className={`text-xs font-semibold tabular-nums ${textColor}`}>
+        {used} <span className="font-normal text-white/30">/ {limit}</span>
+      </span>
+      <div className="h-1.5 w-full rounded-full bg-white/[0.06] overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${color}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-[10px] text-white/25">{Math.round(pct)}% used today</span>
     </div>
   );
 }
