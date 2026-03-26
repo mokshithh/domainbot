@@ -23,13 +23,14 @@ export const CHAT_MODEL =
  */
 export async function getEmbedding(text: string): Promise<number[]> {
   const apiKey = process.env.GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`;
 
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       content: { parts: [{ text: text.replace(/\n/g, " ") }] },
+      outputDimensionality: 768,
     }),
   });
 
