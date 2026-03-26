@@ -18,7 +18,7 @@ export interface CrawlProgress {
 }
 
 const SKIP_EXTENSIONS = /\.(css|js|png|jpg|jpeg|gif|svg|webp|ico|pdf|zip|woff|woff2|ttf|eot|mp4|mp3|xml|json)(\?.*)?$/i;
-const MAX_PAGES = 100;
+const MAX_PAGES = 20;
 const FETCH_TIMEOUT_MS = 10000;
 const MAX_RETRIES = 2;
 

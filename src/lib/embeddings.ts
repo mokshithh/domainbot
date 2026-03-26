@@ -1,86 +1,110 @@
 import { getServiceSupabase } from "./supabase";
 
-const CHUNK_SIZE = 1500; // characters — larger = fewer API calls = faster crawl
-const CHUNK_OVERLAP = 100;
+// Embed the first 2000 chars of each page — 1 API call per page,
+// preserves the most relevant content, well within free-tier limits.
+const MAX_EMBED_CHARS = 2000;
 
-// Gemini free tier: 100 req/min. We send one batch request per page,
-// then wait long enough that (chunks_in_batch / 100) * 60s have "elapsed".
-// Floor at 700ms so single-chunk pages still stay well under the cap.
-const MS_PER_REQUEST = 600; // 100 RPM = 1 req per 600ms
+/**
+ * Get a 768-dim embedding.
+ * Primary: Jina AI (no daily limit, just concurrency ≤2 — sequential calls handle it).
+ * Fallback: Gemini gemini-embedding-001 with auto-retry on 429.
+ */
+async function getEmbedding(text: string): Promise<number[]> {
+  const clean = text.replace(/\n/g, " ").trim();
 
-/** Split text into overlapping chunks */
-export function chunkText(text: string): string[] {
-  const chunks: string[] = [];
-  let start = 0;
+  // ── Jina (primary) ────────────────────────────────────────────────────────
+  if (process.env.JINA_API_KEY) {
+    const res = await fetch("https://api.jina.ai/v1/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.JINA_API_KEY}`,
+      },
+      body: JSON.stringify({
+        input: [clean],
+        model: "jina-embeddings-v3",
+        dimensions: 768,
+      }),
+    });
 
-  while (start < text.length) {
-    const end = Math.min(start + CHUNK_SIZE, text.length);
-    const chunk = text.slice(start, end).trim();
-    if (chunk.length > 100) {
-      chunks.push(chunk);
+    if (res.ok) {
+      const data = await res.json();
+      return data.data[0].embedding;
     }
-    start += CHUNK_SIZE - CHUNK_OVERLAP;
+
+    const errText = await res.text();
+    console.warn(`Jina embedding failed (${res.status}), falling back to Gemini: ${errText.slice(0, 120)}`);
   }
 
-  return chunks;
-}
-
-/** Embed multiple texts in a single Gemini batchEmbedContents call */
-async function batchGetEmbeddings(texts: string[]): Promise<number[][]> {
+  // ── Gemini (fallback) ─────────────────────────────────────────────────────
   const apiKey = process.env.GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents?key=${apiKey}`;
+  if (!apiKey) throw new Error("No embedding API key configured (JINA_API_KEY or GEMINI_API_KEY)");
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      requests: texts.map((text) => ({
-        model: "models/gemini-embedding-001",
-        content: { parts: [{ text: text.replace(/\n/g, " ") }] },
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`;
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: { parts: [{ text: clean }] },
         outputDimensionality: 768,
-      })),
-    }),
-  });
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini embedding error: ${response.status} ${errorText}`);
+    if (res.status === 429) {
+      if (attempt === 3) throw new Error(`Gemini embedding error: 429 quota exhausted`);
+      let waitMs = 35_000;
+      try {
+        const errData = await res.json();
+        const retryInfo = (errData.error?.details ?? []).find(
+          (d: { "@type"?: string }) => d["@type"]?.includes("RetryInfo")
+        );
+        if (retryInfo?.retryDelay) {
+          waitMs = Math.ceil(parseFloat(retryInfo.retryDelay) * 1000) + 2000;
+        }
+      } catch { /* use default */ }
+      console.log(`Gemini 429 — waiting ${waitMs / 1000}s (attempt ${attempt + 1}/3)`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Gemini embedding error: ${res.status} ${errText}`);
+    }
+
+    const data = await res.json();
+    if (!data?.embedding?.values) throw new Error("Gemini embedding response missing values.");
+    return data.embedding.values;
   }
 
-  const data = await response.json();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data.embeddings as any[]).map((e) => e.values);
+  throw new Error("Embedding failed after all retries");
 }
 
-/** Generate embeddings for all chunks of a page and store them in Supabase */
+/** Generate one embedding per page and store it */
 export async function embedAndStorePage(
   botId: string,
   pageId: string,
   text: string
 ): Promise<void> {
   const db = getServiceSupabase();
-  const chunks = chunkText(text);
-  if (chunks.length === 0) return;
 
-  // Delete existing chunks for this page
   await db.from("chunks").delete().eq("page_id", pageId);
 
-  // Send all chunks for this page in one batch request, then wait
-  // proportionally so the overall rate stays ≤ 100 RPM.
-  const embeddings = await batchGetEmbeddings(chunks);
+  const snippet = text.slice(0, MAX_EMBED_CHARS).trim();
+  if (snippet.length < 50) return;
 
-  const rows = chunks.map((chunk_text, i) => ({
+  const embedding = await getEmbedding(snippet);
+
+  const { error } = await db.from("chunks").insert({
     bot_id: botId,
     page_id: pageId,
-    chunk_text,
-    embedding: embeddings[i],
-  }));
+    chunk_text: snippet,
+    embedding,
+  });
+  if (error) console.error("Error inserting chunk:", error);
 
-  const { error } = await db.from("chunks").insert(rows);
-  if (error) {
-    console.error("Error inserting chunks:", error);
-  }
-
-  // Throttle: wait (chunks × 600ms) so we don't exceed 100 RPM across pages
-  await new Promise((r) => setTimeout(r, chunks.length * MS_PER_REQUEST));
+  // 700ms gap keeps Jina under concurrency=2 and Gemini under 100 RPM
+  await new Promise((r) => setTimeout(r, 700));
 }

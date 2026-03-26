@@ -100,11 +100,18 @@ export async function POST(
       stored++;
     }
 
-    // 4. Update bot status
-    await db
-      .from("bots")
-      .update({ status: "ready", total_pages: stored })
-      .eq("id", id);
+    // 4. Update bot status — use a fresh client in case the original
+    //    connection has timed out after a long crawl (JWT/idle timeout).
+    const dbFinal = getServiceSupabase();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { error: updateErr } = await dbFinal
+        .from("bots")
+        .update({ status: "ready", total_pages: stored })
+        .eq("id", id);
+      if (!updateErr) break;
+      console.error(`Bot status update attempt ${attempt + 1} failed:`, updateErr);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
 
     setProgress(id, {
       pagesFound: pages.length,
@@ -125,7 +132,8 @@ export async function POST(
       currentUrl: "",
       status: "error",
     });
-    await db.from("bots").update({ status: "error" }).eq("id", id);
+    const dbErr = getServiceSupabase();
+    await dbErr.from("bots").update({ status: "error" }).eq("id", id);
     setTimeout(() => clearProgress(id), 5000);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
