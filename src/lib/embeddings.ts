@@ -33,20 +33,16 @@ export async function embedAndStorePage(
   // Delete existing chunks for this page
   await db.from("chunks").delete().eq("page_id", pageId);
 
-  const BATCH_SIZE = 5;
-  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-    const batch = chunks.slice(i, i + BATCH_SIZE);
-
-    const rows = await Promise.all(
-      batch.map(async (chunk_text) => {
-        const embedding = await getEmbedding(chunk_text);
-        return { bot_id: botId, page_id: pageId, chunk_text, embedding };
-      })
-    );
-
-    const { error } = await db.from("chunks").insert(rows);
+  // Process chunks sequentially with a delay to stay within Gemini's 100 RPM
+  // free-tier limit (700 ms ≈ 85 RPM, safely under the cap).
+  for (const chunk_text of chunks) {
+    const embedding = await getEmbedding(chunk_text);
+    const { error } = await db
+      .from("chunks")
+      .insert({ bot_id: botId, page_id: pageId, chunk_text, embedding });
     if (error) {
-      console.error("Error inserting chunks:", error);
+      console.error("Error inserting chunk:", error);
     }
+    await new Promise((r) => setTimeout(r, 700));
   }
 }

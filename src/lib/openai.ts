@@ -17,9 +17,8 @@ export const CHAT_MODEL =
   process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
 
 /**
- * Generate an embedding vector using Google Gemini text-embedding-004.
- * We use outputDimensionality: 1024 to stay compatible with existing
- * Supabase pgvector columns (no schema migration needed).
+ * Generate a 768-dim embedding via Gemini gemini-embedding-001.
+ * Free tier: 100 req/min. Callers must throttle — see embedAndStorePage.
  */
 export async function getEmbedding(text: string): Promise<number[]> {
   const apiKey = process.env.GEMINI_API_KEY;
