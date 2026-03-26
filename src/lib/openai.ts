@@ -4,8 +4,8 @@ if (!process.env.GROQ_API_KEY) {
   throw new Error("Missing GROQ_API_KEY environment variable.");
 }
 
-if (!process.env.JINA_API_KEY) {
-  throw new Error("Missing JINA_API_KEY environment variable.");
+if (!process.env.GEMINI_API_KEY) {
+  throw new Error("Missing GEMINI_API_KEY environment variable.");
 }
 
 export const openai = new OpenAI({
@@ -16,35 +16,35 @@ export const openai = new OpenAI({
 export const CHAT_MODEL =
   process.env.GROQ_CHAT_MODEL || "llama-3.3-70b-versatile";
 
-export const EMBEDDING_MODEL =
-  process.env.JINA_EMBEDDING_MODEL || "jina-embeddings-v3";
-
-/** Generate an embedding vector for a piece of text using Jina */
+/**
+ * Generate an embedding vector using Google Gemini text-embedding-004.
+ * We use outputDimensionality: 1024 to stay compatible with existing
+ * Supabase pgvector columns (no schema migration needed).
+ */
 export async function getEmbedding(text: string): Promise<number[]> {
-  const response = await fetch("https://api.jina.ai/v1/embeddings", {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.JINA_API_KEY}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: [text.replace(/\n/g, " ")],
+      model: "models/text-embedding-004",
+      content: { parts: [{ text: text.replace(/\n/g, " ") }] },
+      outputDimensionality: 1024,
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `Jina embedding error: ${response.status} ${errorText}`
-    );
+    throw new Error(`Gemini embedding error: ${response.status} ${errorText}`);
   }
 
   const data = await response.json();
 
-  if (!data?.data?.[0]?.embedding) {
-    throw new Error("Jina embedding response missing embedding data.");
+  if (!data?.embedding?.values) {
+    throw new Error("Gemini embedding response missing values.");
   }
 
-  return data.data[0].embedding;
+  return data.embedding.values;
 }
