@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --gradient-color: #8350e8;
+  --sparkles-color: #8350e8;
+}
+
 @layer base {
   :root {
     --font-display: 'Syne', sans-serif;
