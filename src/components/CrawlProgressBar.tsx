@@ -8,9 +8,10 @@ import type { CrawlProgressState } from "@/lib/types";
 interface Props {
   botId: string;
   onComplete?: () => void;
+  onProgress?: (pct: number) => void;
 }
 
-export default function CrawlProgressBar({ botId, onComplete }: Props) {
+export default function CrawlProgressBar({ botId, onComplete, onProgress }: Props) {
   const [progress, setProgress] = useState<CrawlProgressState>({
     pagesFound: 0,
     pagesCrawled: 0,
@@ -46,6 +47,11 @@ export default function CrawlProgressBar({ botId, onComplete }: Props) {
     progress.pagesFound > 0
       ? Math.round((progress.pagesCrawled / Math.max(progress.pagesFound, 1)) * 100)
       : progress.status === "crawling" ? 5 : 100;
+
+  // Notify parent of progress changes
+  useEffect(() => {
+    onProgress?.(pct);
+  }, [pct, onProgress]);
 
   return (
     <div className="rounded-xl border border-white/[0.08] bg-surface-2 p-4 space-y-3">
