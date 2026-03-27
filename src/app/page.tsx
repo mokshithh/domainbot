@@ -121,7 +121,7 @@ export default function LandingPage() {
             </Link>
             <Link
               href="/bots/new"
-              className="rounded-lg bg-gradient-to-r from-brand-500 to-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-glow-sm hover:shadow-glow transition-shadow"
+              className="rounded-lg bg-gradient-to-r from-brand-500 to-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-glow-sm hover:shadow-glow transition-all hover:scale-[1.04] active:scale-[0.97]"
             >
               Get Started Free
             </Link>
@@ -154,14 +154,14 @@ export default function LandingPage() {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link
               href="/bots/new"
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-purple-500 px-7 py-3.5 text-base font-semibold text-white shadow-glow hover:shadow-[0_0_60px_rgba(6,182,212,0.25)] transition-all hover:-translate-y-0.5"
+              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-purple-500 px-7 py-3.5 text-base font-semibold text-white shadow-glow hover:shadow-[0_0_60px_rgba(6,182,212,0.25)] transition-all hover:-translate-y-0.5 hover:scale-[1.04] active:scale-[0.97]"
             >
               Create your bot
               <ArrowRight size={16} />
             </Link>
             <Link
               href="/dashboard"
-              className="flex items-center gap-2 rounded-xl border border-white/10 px-7 py-3.5 text-base font-medium text-white/70 hover:text-white hover:border-white/20 transition-all"
+              className="flex items-center gap-2 rounded-xl border border-white/10 px-7 py-3.5 text-base font-medium text-white/70 hover:text-white hover:border-white/20 transition-all hover:scale-[1.03] active:scale-[0.97]"
             >
               <LayoutDashboard size={15} />
               View Dashboard

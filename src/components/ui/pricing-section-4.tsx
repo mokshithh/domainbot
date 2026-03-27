@@ -290,9 +290,9 @@ export default function PricingSection() {
 
               <CardContent className="pt-0">
                 <button
-                  className={`w-full mb-6 p-4 text-xl rounded-xl ${
+                  className={`w-full mb-6 p-4 text-xl rounded-xl transition-all hover:scale-[1.03] active:scale-[0.97] ${
                     plan.popular
-                      ? "bg-gradient-to-t from-blue-500 to-blue-600 shadow-lg shadow-blue-800 border border-blue-500 text-white"
+                      ? "bg-gradient-to-t from-blue-500 to-blue-600 shadow-lg shadow-blue-800 border border-blue-500 text-white hover:shadow-blue-700"
                       : "bg-gradient-to-t from-neutral-950 to-neutral-600 shadow-lg shadow-neutral-900 border border-neutral-800 text-white"
                   }`}
                 >
