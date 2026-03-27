@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { HeroShapes } from "@/components/ui/shape-landing-hero";
+import PricingSection from "@/components/ui/pricing-section-4";
 import {
   Globe,
   Brain,
@@ -11,7 +12,6 @@ import {
   BarChart2,
   Lock,
   ArrowRight,
-  Check,
   LayoutDashboard,
 } from "lucide-react";
 
@@ -81,47 +81,6 @@ const FEATURES = [
   },
 ];
 
-const PLANS = [
-  {
-    name: "Free",
-    price: "$0",
-    period: "",
-    features: ["2 bots", "20 pages / bot", "50 chats / day", "Embed widget", "Community support"],
-    cta: "Get started free",
-    href: "/bots/new",
-    highlight: false,
-  },
-  {
-    name: "Pro",
-    price: "$20",
-    period: "/ mo",
-    features: [
-      "10 bots",
-      "50 pages / bot",
-      "500 chats / day",
-      "File uploads (PDF, DOCX)",
-      "Priority support",
-    ],
-    cta: "See pricing",
-    href: "/pricing",
-    highlight: true,
-  },
-  {
-    name: "Max",
-    price: "$45",
-    period: "/ mo",
-    features: [
-      "Unlimited bots",
-      "100 pages / bot",
-      "10,000 chats / day",
-      "Full customization",
-      "Dedicated support",
-    ],
-    cta: "See pricing",
-    href: "/pricing",
-    highlight: false,
-  },
-];
 
 export default function LandingPage() {
   return (
@@ -147,6 +106,12 @@ export default function LandingPage() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href="#pricing"
+              className="text-sm text-white/50 hover:text-white transition-colors"
+            >
+              Pricing
+            </Link>
             <Link
               href="/dashboard"
               className="flex items-center gap-1.5 text-sm text-white/50 hover:text-white transition-colors"
@@ -278,74 +243,8 @@ export default function LandingPage() {
       </section>
 
       {/* Pricing */}
-      <section className="relative z-10 px-6 py-24">
-        <div className="mx-auto max-w-4xl">
-          <div className="text-center mb-14">
-            <h2
-              className="text-3xl font-bold text-white"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              Simple pricing
-            </h2>
-            <p className="mt-3 text-white/40">Start free. Scale when you grow.</p>
-          </div>
-
-          <div className="grid gap-5 md:grid-cols-3">
-            {PLANS.map((plan) => (
-              <div
-                key={plan.name}
-                className={`relative rounded-2xl border p-6 shadow-card flex flex-col gap-5 ${
-                  plan.highlight
-                    ? "border-brand-500/40 bg-gradient-to-b from-brand-500/8 to-surface-2"
-                    : "border-border-subtle bg-surface-2"
-                }`}
-              >
-                {plan.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span className="rounded-full bg-gradient-brand px-3 py-0.5 text-[11px] font-semibold text-white shadow-glow-sm">
-                      Most Popular
-                    </span>
-                  </div>
-                )}
-                <div>
-                  <p className="text-sm font-medium text-white/50">{plan.name}</p>
-                  <div className="mt-1 flex items-end gap-1">
-                    <span
-                      className="text-3xl font-bold text-white"
-                      style={{ fontFamily: "var(--font-display)" }}
-                    >
-                      {plan.price}
-                    </span>
-                    {plan.period && <span className="mb-1 text-sm text-white/40">{plan.period}</span>}
-                  </div>
-                </div>
-
-                <ul className="space-y-2.5 flex-1">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2.5 text-sm text-white/60">
-                      <Check size={13} className="text-brand-400 flex-shrink-0" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-
-                <Link
-                  href={plan.href}
-                  className={`block w-full rounded-xl py-2.5 text-center text-sm font-semibold transition-all ${
-                    plan.highlight
-                      ? "bg-gradient-brand text-white shadow-glow-sm hover:shadow-glow"
-                      : "border border-border-default text-white/60 hover:text-white hover:border-border-strong"
-                  }`}
-                >
-                  {plan.cta}
-                </Link>
-              </div>
-            ))}
-          </div>
-          <p className="mt-6 text-center text-xs text-white/20">
-            All plans include a free trial. No credit card required to start.
-          </p>
-        </div>
+      <section id="pricing" className="relative z-10">
+        <PricingSection />
       </section>
 
       {/* Footer */}
