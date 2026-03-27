@@ -159,7 +159,7 @@ async function trySitemap(domain: string): Promise<string[]> {
           isSameDomain(l, new URL(domain).origin)
       );
 
-      if (pages.length > 0) return pages.slice(0, MAX_PAGES);
+      if (pages.length > 0) return pages;
     } catch {
       // continue to next candidate
     }
@@ -170,7 +170,8 @@ async function trySitemap(domain: string): Promise<string[]> {
 
 export async function crawlDomain(
   rawDomain: string,
-  onProgress?: (progress: CrawlProgress) => void
+  onProgress?: (progress: CrawlProgress) => void,
+  maxPages: number = MAX_PAGES
 ): Promise<CrawledPage[]> {
   // Normalize the domain into a full origin URL
   let origin = rawDomain.trim();
@@ -202,7 +203,7 @@ export async function crawlDomain(
     status: "crawling",
   });
 
-  while (queue.length > 0 && results.length < MAX_PAGES) {
+  while (queue.length > 0 && results.length < maxPages) {
     const url = queue.shift()!;
     if (visited.has(url)) continue;
     visited.add(url);

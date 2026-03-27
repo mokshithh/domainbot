@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { HeroShapes } from "@/components/ui/shape-landing-hero";
 import {
   Globe,
   Brain,
@@ -82,39 +83,42 @@ const FEATURES = [
 
 const PLANS = [
   {
-    name: "Starter",
-    price: "Free",
+    name: "Free",
+    price: "$0",
     period: "",
-    features: ["3 bots", "25 pages / bot", "100 chats / day", "Embed widget", "Basic support"],
-    cta: "Get started",
+    features: ["2 bots", "20 pages / bot", "50 chats / day", "Embed widget", "Community support"],
+    cta: "Get started free",
+    href: "/bots/new",
     highlight: false,
   },
   {
     name: "Pro",
-    price: "$29",
+    price: "$20",
+    period: "/ mo",
+    features: [
+      "10 bots",
+      "50 pages / bot",
+      "500 chats / day",
+      "File uploads (PDF, DOCX)",
+      "Priority support",
+    ],
+    cta: "See pricing",
+    href: "/pricing",
+    highlight: true,
+  },
+  {
+    name: "Max",
+    price: "$45",
     period: "/ mo",
     features: [
       "Unlimited bots",
       "100 pages / bot",
-      "5,000 chats / day",
-      "Custom branding",
-      "Priority support",
-    ],
-    cta: "Start free trial",
-    highlight: true,
-  },
-  {
-    name: "Business",
-    price: "$99",
-    period: "/ mo",
-    features: [
-      "Everything in Pro",
-      "1,000 pages / bot",
-      "Unlimited chats",
-      "API access",
+      "10,000 chats / day",
+      "Full customization",
       "Dedicated support",
     ],
-    cta: "Contact sales",
+    cta: "See pricing",
+    href: "/pricing",
     highlight: false,
   },
 ];
@@ -161,8 +165,9 @@ export default function LandingPage() {
       </nav>
 
       {/* Hero */}
-      <section className="relative z-10 px-6 pt-28 pb-24 text-center">
-        <div className="mx-auto max-w-3xl">
+      <section className="relative z-10 px-6 pt-28 pb-24 text-center overflow-hidden">
+        <HeroShapes />
+        <div className="relative z-10 mx-auto max-w-3xl">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-500/25 bg-brand-500/8 px-4 py-1.5 text-xs text-brand-400">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-400 animate-pulse" />
             No code required — deploy in minutes
@@ -325,7 +330,7 @@ export default function LandingPage() {
                 </ul>
 
                 <Link
-                  href="/bots/new"
+                  href={plan.href}
                   className={`block w-full rounded-xl py-2.5 text-center text-sm font-semibold transition-all ${
                     plan.highlight
                       ? "bg-gradient-brand text-white shadow-glow-sm hover:shadow-glow"
@@ -338,7 +343,7 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="mt-6 text-center text-xs text-white/20">
-            Pricing plans are illustrative for this MVP. Billing not yet implemented.
+            All plans include a free trial. No credit card required to start.
           </p>
         </div>
       </section>

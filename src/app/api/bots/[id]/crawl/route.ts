@@ -3,6 +3,7 @@ import { getServiceSupabase } from "@/lib/supabase";
 import { crawlDomain } from "@/lib/crawler";
 import { embedAndStorePage } from "@/lib/embeddings";
 import { setProgress, clearProgress } from "@/lib/crawlProgress";
+import { PLANS } from "@/lib/plans";
 
 // Allow up to 300 seconds (Vercel Pro) — reduce to 60 for Hobby tier
 export const maxDuration = 300;
@@ -26,6 +27,15 @@ export async function POST(
     return NextResponse.json({ error: "Bot not found" }, { status: 404 });
   }
 
+  // Look up owner's plan to enforce page limit
+  const { data: profile } = await db
+    .from("user_profiles")
+    .select("plan")
+    .eq("id", bot.user_id)
+    .single();
+  const plan = (profile?.plan ?? "free") as "free" | "pro" | "max";
+  const maxPages = PLANS[plan].maxPages;
+
   // Mark as crawling
   await db.from("bots").update({ status: "crawling" }).eq("id", id);
 
@@ -39,7 +49,7 @@ export async function POST(
   });
 
   try {
-    // 1. Crawl with progress tracking
+    // 1. Crawl with progress tracking (capped to plan's page limit)
     const pages = await crawlDomain(bot.allowed_domain, (progress) => {
       setProgress(id, {
         pagesFound: progress.pagesFound,
@@ -48,7 +58,7 @@ export async function POST(
         currentUrl: progress.currentUrl,
         status: "crawling",
       });
-    });
+    }, maxPages);
 
     if (pages.length === 0) {
       setProgress(id, {
