@@ -4,7 +4,7 @@ import AppShell from "@/components/AppShell";
 import { getServiceSupabase, getAuthUser } from "@/lib/supabase";
 import type { Plan } from "@/lib/plans";
 
-export default async function BotsLayout({ children }: { children: React.ReactNode }) {
+export default async function LeadsLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
   const user = await getAuthUser(cookieStore);
   if (!user) redirect("/login");

@@ -4,8 +4,6 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const origin = process.env.NEXT_PUBLIC_APP_URL || "";
-
-  // Allow callers to get the script with their bot_key baked in
   const botKey = searchParams.get("bot_key") || "";
 
   const script = buildWidgetScript(origin, botKey);
@@ -54,7 +52,7 @@ function buildWidgetScript(appUrl: string, botKey: string): string {
     ".db-msg{max-width:84%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;word-break:break-word;}",
     ".db-msg.user{align-self:flex-end;background:linear-gradient(135deg,#06b6d4,#0891b2);color:#fff;border-bottom-right-radius:4px;}",
     ".db-msg.assistant{align-self:flex-start;background:rgba(255,255,255,.06);color:rgba(255,255,255,.9);border-bottom-left-radius:4px;}",
-    ".db-msg.typing{color:rgba(255,255,255,.4);}",
+    ".db-msg.typing{color:rgba(255,255,255,.4);font-style:italic;}",
     ".db-citations{align-self:flex-start;font-size:11px;color:rgba(255,255,255,.35);margin-top:-4px;}",
     ".db-citations a{color:#06b6d4;text-decoration:none;}",
     "#db-widget-input-row{padding:12px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:8px;}",
@@ -106,7 +104,7 @@ function buildWidgetScript(appUrl: string, botKey: string): string {
     if (isOpen) {
       panel.classList.add("db-open");
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
-      inputEl.focus();
+      if (inputEl) inputEl.focus();
       scrollToBottom();
     } else {
       panel.classList.remove("db-open");
@@ -134,14 +132,17 @@ function buildWidgetScript(appUrl: string, botKey: string): string {
     }
 
     scrollToBottom();
+    return div;
   }
 
   function setLoading(loading) {
-    sendBtn.disabled = loading;
-    inputEl.disabled = loading;
+    if (sendBtn) sendBtn.disabled = loading;
+    if (inputEl) inputEl.disabled = loading;
   }
 
+  // ── Streaming SSE reader ───────────────────────────────────────────────
   async function sendMessage() {
+    if (!inputEl) return;
     var text = inputEl.value.trim();
     if (!text) return;
 
@@ -167,17 +168,80 @@ function buildWidgetScript(appUrl: string, botKey: string): string {
         }),
       });
 
-      var data = await res.json();
-      typingEl.remove();
+      // Check if response is SSE (streaming)
+      var contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        // ── Streaming path ─────────────────────────────────────────────
+        typingEl.remove();
+        var assistantEl = appendMessage("assistant", "", null);
+        var fullText = "";
+        var finalCitations = [];
 
-      if (data.error) {
-        appendMessage("assistant", "Sorry, something went wrong. Please try again.", null);
-      } else {
-        if (data.session_id) {
-          sessionId = data.session_id;
-          sessionStorage.setItem(SESSION_KEY, sessionId);
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = "";
+
+        while (true) {
+          var _ref = await reader.read();
+          var done = _ref.done;
+          var value = _ref.value;
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          var lines = buffer.split("\\n");
+          buffer = lines.pop() || "";
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line.startsWith("data:")) continue;
+            var jsonStr = line.slice(5).trim();
+            if (!jsonStr) continue;
+            try {
+              var event = JSON.parse(jsonStr);
+              if (event.chunk) {
+                fullText += event.chunk;
+                assistantEl.textContent = fullText;
+                scrollToBottom();
+              }
+              if (event.session_id) {
+                sessionId = event.session_id;
+                sessionStorage.setItem(SESSION_KEY, sessionId);
+              }
+              if (event.citations) {
+                finalCitations = event.citations;
+              }
+              if (event.error) {
+                assistantEl.textContent = "Sorry, something went wrong. Please try again.";
+              }
+            } catch (e) {
+              // ignore parse errors
+            }
+          }
         }
-        appendMessage("assistant", data.answer, data.citations);
+
+        // Append citations after stream is done
+        if (finalCitations.length > 0) {
+          var citeEl = document.createElement("div");
+          citeEl.className = "db-citations";
+          citeEl.innerHTML = "Sources: " + finalCitations.slice(0, 3).map(function(c) {
+            return '<a href="' + c.url + '" target="_blank">' + (c.title || c.url) + '</a>';
+          }).join(", ");
+          messagesEl.appendChild(citeEl);
+          scrollToBottom();
+        }
+      } else {
+        // ── JSON fallback path ─────────────────────────────────────────
+        var data = await res.json();
+        typingEl.remove();
+        if (data.error) {
+          appendMessage("assistant", "Sorry, something went wrong: " + data.error, null);
+        } else {
+          if (data.session_id) {
+            sessionId = data.session_id;
+            sessionStorage.setItem(SESSION_KEY, sessionId);
+          }
+          appendMessage("assistant", data.answer || data.content || "...", data.citations || null);
+        }
       }
     } catch (e) {
       typingEl.remove();
@@ -189,22 +253,22 @@ function buildWidgetScript(appUrl: string, botKey: string): string {
 
   // ── Event listeners ────────────────────────────────────────────────────
   btn.addEventListener("click", togglePanel);
-  closeBtn.addEventListener("click", togglePanel);
+  if (closeBtn) closeBtn.addEventListener("click", togglePanel);
+  if (sendBtn) sendBtn.addEventListener("click", sendMessage);
 
-  sendBtn.addEventListener("click", sendMessage);
+  if (inputEl) {
+    inputEl.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
 
-  inputEl.addEventListener("keydown", function(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
-
-  // Auto-resize textarea
-  inputEl.addEventListener("input", function() {
-    this.style.height = "40px";
-    this.style.height = Math.min(this.scrollHeight, 120) + "px";
-  });
+    inputEl.addEventListener("input", function() {
+      this.style.height = "40px";
+      this.style.height = Math.min(this.scrollHeight, 120) + "px";
+    });
+  }
 
 })();
 `.trim();

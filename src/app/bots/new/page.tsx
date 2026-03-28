@@ -3,14 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { PLANS } from "@/lib/plans";
 
 export default function NewBotPage() {
   const router = useRouter();
-  const [form, setForm] = useState({
-    name: "",
-    allowed_domain: "",
-    daily_chat_limit: "100",
-  });
+  const [form, setForm] = useState({ name: "", allowed_domain: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -33,11 +30,7 @@ export default function NewBotPage() {
       const res = await fetch("/api/bots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          allowed_domain: form.allowed_domain,
-          daily_chat_limit: parseInt(form.daily_chat_limit) || 100,
-        }),
+        body: JSON.stringify({ name: form.name, allowed_domain: form.allowed_domain }),
       });
 
       const data = await res.json();
@@ -59,28 +52,20 @@ export default function NewBotPage() {
     <div className="mx-auto max-w-xl space-y-8">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-white/35">
-        <Link href="/bots" className="hover:text-white/60 transition-colors">
-          Bots
-        </Link>
+        <Link href="/bots" className="hover:text-white/60 transition-colors">Bots</Link>
         <span>/</span>
         <span className="text-white/60">New Bot</span>
       </div>
 
-      {/* Header */}
       <div>
-        <h1
-          className="text-2xl font-bold text-white"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
+        <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "var(--font-display)" }}>
           Create a new bot
         </h1>
         <p className="mt-2 text-sm text-white/45 leading-relaxed">
-          Enter your website domain and we&apos;ll crawl it to build a chatbot knowledge
-          base automatically.
+          Enter your website domain and we&apos;ll crawl it to build a chatbot knowledge base automatically.
         </p>
       </div>
 
-      {/* Form */}
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="rounded-2xl border border-border-subtle bg-surface-2 p-6 shadow-card space-y-5">
           {/* Bot name */}
@@ -97,9 +82,7 @@ export default function NewBotPage() {
               disabled={loading}
               required
             />
-            <p className="text-xs text-white/30">
-              Shown to visitors in the chat widget
-            </p>
+            <p className="text-xs text-white/30">Shown to visitors in the chat widget</p>
           </div>
 
           {/* Domain */}
@@ -108,9 +91,7 @@ export default function NewBotPage() {
               Website Domain <span className="text-red-400">*</span>
             </label>
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-white/30">
-                🌐
-              </span>
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-white/30">🌐</span>
               <input
                 type="text"
                 placeholder="example.com or https://example.com"
@@ -122,26 +103,7 @@ export default function NewBotPage() {
               />
             </div>
             <p className="text-xs text-white/30">
-              We&apos;ll crawl this domain (up to 25 pages). The widget will only work on this domain.
-            </p>
-          </div>
-
-          {/* Daily limit */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-white/70">
-              Daily Chat Limit
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="10000"
-              value={form.daily_chat_limit}
-              onChange={(e) => set("daily_chat_limit", e.target.value)}
-              className="w-full rounded-xl border border-border-subtle bg-surface-3 px-4 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-brand-500/50 transition-colors"
-              disabled={loading}
-            />
-            <p className="text-xs text-white/30">
-              Max conversations per day. Resets every 24 hours.
+              We&apos;ll crawl this domain (up to {PLANS.free.maxPages} pages on Free plan). The widget will only work on this domain.
             </p>
           </div>
         </div>
@@ -155,11 +117,8 @@ export default function NewBotPage() {
           </div>
         )}
 
-        {/* What happens next */}
         <div className="rounded-xl border border-border-subtle bg-surface-1 p-4 space-y-2">
-          <p className="text-xs font-medium text-white/50 uppercase tracking-wide">
-            What happens next
-          </p>
+          <p className="text-xs font-medium text-white/50 uppercase tracking-wide">What happens next</p>
           {[
             "Your bot is created with a unique key",
             "Go to the bot page and click Crawl Website",
@@ -195,9 +154,7 @@ export default function NewBotPage() {
                 </svg>
                 Creating…
               </>
-            ) : (
-              "Create Bot →"
-            )}
+            ) : "Create Bot →"}
           </button>
         </div>
       </form>

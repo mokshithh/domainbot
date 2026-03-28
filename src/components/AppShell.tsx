@@ -3,22 +3,30 @@
 import { useState, useEffect } from "react";
 import Sidebar from "./Sidebar";
 import { Menu, X } from "lucide-react";
+import type { Plan } from "@/lib/plans";
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+interface AppShellProps {
+  children: React.ReactNode;
+  userEmail?: string;
+  plan?: Plan;
+  dailyChatCount?: number;
+}
+
+export default function AppShell({ children, userEmail, plan, dailyChatCount }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  /* Close on route change */
   useEffect(() => {
     const handler = () => setMobileOpen(false);
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
-  /* Lock body scroll when mobile menu is open */
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [mobileOpen]);
+
+  const sidebarProps = { userEmail, plan, dailyChatCount };
 
   return (
     <div className="min-h-screen bg-surface-0">
@@ -30,7 +38,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Desktop sidebar */}
       <div className="hidden lg:block">
-        <Sidebar onNavClick={() => {}} />
+        <Sidebar onNavClick={() => {}} {...sidebarProps} />
       </div>
 
       {/* Mobile top bar */}
@@ -67,7 +75,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <Sidebar onNavClick={() => setMobileOpen(false)} />
+        <Sidebar onNavClick={() => setMobileOpen(false)} {...sidebarProps} />
       </div>
 
       {/* Main content */}

@@ -34,7 +34,7 @@ export default function BotCard({ bot }: { bot: Bot }) {
         <StatChip
           icon={MessageSquare}
           label="Today"
-          value={`${bot.daily_chat_count}/${bot.daily_chat_limit}`}
+          value={bot.daily_chat_count.toString()}
         />
         <StatChip icon={Clock} label="Created" value={relativeTime(bot.created_at)} />
       </div>

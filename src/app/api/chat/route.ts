@@ -1,5 +1,6 @@
 import { getServiceSupabase } from "@/lib/supabase";
 import { getEmbedding, openai, CHAT_MODEL } from "@/lib/openai";
+import { PLANS } from "@/lib/plans";
 import type { MatchedChunk } from "@/lib/types";
 
 /** POST /api/chat — streaming chat response via SSE */
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
 
     const db = getServiceSupabase();
 
-    // 1. Resolve bot
+    // 1. Resolve bot + its owner's profile
     const { data: bot, error: botErr } = await db
       .from("bots")
       .select("*")
@@ -38,10 +39,44 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Daily limit check
-    if (bot.daily_chat_count >= bot.daily_chat_limit) {
+    // 2. Per-user daily limit check
+    const { data: profile } = await db
+      .from("user_profiles")
+      .select("plan, daily_chat_count, daily_chat_reset_at")
+      .eq("id", bot.user_id)
+      .single();
+
+    const plan = (profile?.plan ?? "free") as "free" | "pro" | "max";
+    const planConfig = PLANS[plan];
+    let dailyCount = profile?.daily_chat_count ?? 0;
+    const resetAt = profile?.daily_chat_reset_at ? new Date(profile.daily_chat_reset_at) : null;
+
+    // Auto-reset if past reset time (fallback if pg_cron not set up)
+    if (resetAt && resetAt <= new Date()) {
+      await db
+        .from("user_profiles")
+        .update({
+          daily_chat_count: 0,
+          daily_chat_reset_at: new Date(
+            Date.UTC(
+              new Date().getUTCFullYear(),
+              new Date().getUTCMonth(),
+              new Date().getUTCDate() + 1
+            )
+          ).toISOString(),
+        })
+        .eq("id", bot.user_id);
+      dailyCount = 0;
+    }
+
+    if (dailyCount >= planConfig.chatsPerDay) {
       return new Response(
-        JSON.stringify({ error: "Daily chat limit reached." }),
+        JSON.stringify({
+          error: `Daily chat limit reached (${planConfig.chatsPerDay}/day on ${planConfig.label} plan). Upgrade for more.`,
+          code: "DAILY_LIMIT_REACHED",
+          plan,
+          limit: planConfig.chatsPerDay,
+        }),
         { status: 429, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -75,7 +110,7 @@ export async function POST(request: Request) {
       sessionDbId = newSession.id;
     }
 
-    // 4. Fetch last 8 messages (4 turns) for conversation history
+    // 4. Fetch last 8 messages for conversation history
     const { data: recentMessages } = await db
       .from("messages")
       .select("role, content")
@@ -117,14 +152,27 @@ export async function POST(request: Request) {
         pageId: string;
       }>;
 
-    // Build context string (even if empty — LLM will say it doesn't know)
     const contextText = chunkErr || !chunks || chunks.length === 0
       ? ""
       : chunks.map((c, i) => `[${i + 1}] ${c.chunk_text}`).join("\n\n");
 
-    // 8. Build system prompt
+    // 8. Build system prompt — use custom one for Max plan if set
     const domainDisplay = bot.allowed_domain.replace(/^https?:\/\//, "");
-    const systemPrompt = `You are a helpful, friendly assistant for ${domainDisplay}.
+    const customSystemPrompt = planConfig.customization && bot.system_prompt
+      ? bot.system_prompt
+      : null;
+
+    const personalityMap: Record<string, string> = {
+      professional: "professional and helpful",
+      friendly: "warm, friendly, and conversational",
+      casual: "casual and approachable",
+      formal: "formal and precise",
+    };
+    const personality = personalityMap[bot.bot_personality ?? "professional"] ?? "helpful";
+
+    const systemPrompt = customSystemPrompt
+      ? `${customSystemPrompt}\n\nWEBSITE CONTENT:\n${contextText || "No relevant content found."}`
+      : `You are a ${personality} assistant for ${domainDisplay}.
 Your job is to answer customer questions based ONLY on the website content provided below.
 
 Guidelines:
@@ -132,7 +180,6 @@ Guidelines:
 - If the answer is in the content, answer confidently and naturally
 - If the answer cannot be found in the content, say: "I'm not sure about that based on the website content. You might want to contact the team directly."
 - Never make up information not in the content
-- Use the customer's language and tone
 ${bot.bot_name_display ? `- You are "${bot.bot_name_display}"` : ""}
 
 WEBSITE CONTENT:
@@ -173,24 +220,27 @@ ${contextText || "No relevant content found."}`;
             { chat_session_id: sessionDbId, role: "assistant", content: fullAnswer },
           ]);
 
-          // Increment daily chat count
-          await db
-            .from("bots")
-            .update({ daily_chat_count: bot.daily_chat_count + 1 })
-            .eq("id", bot.id);
+          // Increment per-bot count (analytics) + per-user count (quota)
+          await Promise.all([
+            db.from("bots")
+              .update({ daily_chat_count: bot.daily_chat_count + 1 })
+              .eq("id", bot.id),
+            db.from("user_profiles")
+              .update({ daily_chat_count: dailyCount + 1 })
+              .eq("id", bot.user_id),
+          ]);
 
-          // Increment citation counts on cited pages
+          // Increment citation counts
           if (citations.length > 0) {
             for (const citation of citations) {
               try {
                 await db.rpc("increment_citation_count", { page_id_input: citation.pageId });
               } catch {
-                // RPC not available; skip citation count
+                // RPC not available; skip
               }
             }
           }
 
-          // Send final event with metadata
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({

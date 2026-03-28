@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServiceSupabase } from "@/lib/supabase";
+import { cookies } from "next/headers";
+import { getServiceSupabase, getAuthUser } from "@/lib/supabase";
 import { crawlDomain } from "@/lib/crawler";
 import { embedAndStorePage } from "@/lib/embeddings";
 import { setProgress, clearProgress } from "@/lib/crawlProgress";
@@ -14,13 +15,20 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  // Auth check
+  const cookieStore = await cookies();
+  const user = await getAuthUser(cookieStore);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const db = getServiceSupabase();
 
-  // Fetch bot
+  // Fetch bot and verify ownership
   const { data: bot, error: botErr } = await db
     .from("bots")
     .select("*")
     .eq("id", id)
+    .eq("user_id", user.id)
     .single();
 
   if (botErr || !bot) {

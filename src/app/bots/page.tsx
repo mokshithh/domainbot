@@ -1,15 +1,18 @@
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getServiceSupabase } from "@/lib/supabase";
+import { getServiceSupabase, getAuthUser } from "@/lib/supabase";
 import BotCard from "@/components/BotCard";
 import type { Bot } from "@/lib/types";
 import { Bot as BotIcon, Plus } from "lucide-react";
 
-async function getBots(): Promise<Bot[]> {
+async function getBots(userId: string): Promise<Bot[]> {
   try {
     const db = getServiceSupabase();
     const { data } = await db
       .from("bots")
       .select("*")
+      .eq("user_id", userId)
       .order("created_at", { ascending: false });
     return (data as Bot[]) || [];
   } catch {
@@ -18,17 +21,18 @@ async function getBots(): Promise<Bot[]> {
 }
 
 export default async function BotsPage() {
-  const bots = await getBots();
+  const cookieStore = await cookies();
+  const user = await getAuthUser(cookieStore);
+  if (!user) redirect("/login");
+
+  const bots = await getBots(user.id);
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1
-            className="text-2xl font-bold text-white"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
+          <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "var(--font-display)" }}>
             Your Bots
           </h1>
           <p className="mt-1 text-sm text-white/40">

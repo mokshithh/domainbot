@@ -1,20 +1,26 @@
 import { NextResponse } from "next/server";
-import { getServiceSupabase } from "@/lib/supabase";
+import { cookies } from "next/headers";
+import { getServiceSupabase, getAuthUser } from "@/lib/supabase";
 
-/** GET /api/bots/[id]/analytics */
+/** GET /api/bots/[id]/analytics — Auth required, owner only */
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const cookieStore = await cookies();
+    const user = await getAuthUser(cookieStore);
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
     const db = getServiceSupabase();
 
-    // Verify bot exists
+    // Verify ownership
     const { data: bot } = await db
       .from("bots")
-      .select("id")
+      .select("id, user_id")
       .eq("id", id)
+      .eq("user_id", user.id)
       .single();
 
     if (!bot) {
@@ -35,12 +41,11 @@ export async function GET(
     const messagesPerDay: Record<string, number> = {};
 
     if (sessionIds.length > 0) {
-      // Get all messages for these sessions
       const { data: messages } = await db
         .from("messages")
         .select("role, created_at")
         .in("chat_session_id", sessionIds)
-        .eq("role", "user") // count only user messages as "conversations"
+        .eq("role", "user")
         .order("created_at", { ascending: true });
 
       total_messages = (messages || []).length;
@@ -51,23 +56,25 @@ export async function GET(
       for (const msg of messages || []) {
         const date = new Date(msg.created_at);
         if (date >= todayStart) messages_today++;
-
-        // Group by date (last 7 days)
         const dateKey = date.toISOString().split("T")[0];
         messagesPerDay[dateKey] = (messagesPerDay[dateKey] || 0) + 1;
       }
     }
 
-    // Build last 7 days chart data
+    // Last 14 days chart data (Max plan gets more history)
+    const { data: profile } = await db
+      .from("user_profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .single();
+
+    const chartDays = profile?.plan === "max" ? 30 : 7;
     const messages_per_day = [];
-    for (let i = 6; i >= 0; i--) {
+    for (let i = chartDays - 1; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateKey = d.toISOString().split("T")[0];
-      messages_per_day.push({
-        date: dateKey,
-        count: messagesPerDay[dateKey] || 0,
-      });
+      messages_per_day.push({ date: dateKey, count: messagesPerDay[dateKey] || 0 });
     }
 
     // Top pages by citation count
@@ -76,14 +83,22 @@ export async function GET(
       .select("url, title, citation_count")
       .eq("bot_id", id)
       .order("citation_count", { ascending: false })
-      .limit(5);
+      .limit(10);
+
+    // Lead count (Max)
+    const { count: lead_count } = await db
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("bot_id", id);
 
     return NextResponse.json({
       messages_today,
       total_messages,
       total_sessions,
+      lead_count: lead_count ?? 0,
       top_pages: topPages || [],
       messages_per_day,
+      chart_days: chartDays,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
