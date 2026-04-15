@@ -3,16 +3,71 @@ import { getEmbedding, openai, CHAT_MODEL } from "@/lib/openai";
 import { PLANS } from "@/lib/plans";
 import type { MatchedChunk } from "@/lib/types";
 
+// In-memory rate limit: 30 req/min per bot_key (resets on cold start — acceptable for MVP)
+const chatRateMap = new Map<string, { count: number; resetAt: number }>();
+function isRateLimited(key: string, limit = 30, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const entry = chatRateMap.get(key);
+  if (!entry || now > entry.resetAt) {
+    chatRateMap.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  if (entry.count >= limit) return true;
+  entry.count++;
+  return false;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+/** OPTIONS /api/chat — CORS preflight for cross-origin widget embeds */
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS });
+}
+
 /** POST /api/chat — streaming chat response via SSE */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { bot_key, message, session_id } = body;
+    const { bot_key, message, session_id, response_length, tone_override } = body;
 
     if (!bot_key || !message) {
       return new Response(
         JSON.stringify({ error: "bot_key and message are required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS } }
+      );
+    }
+
+    if (isRateLimited(bot_key)) {
+      return new Response(
+        JSON.stringify({ error: "Too many requests. Please slow down." }),
+        { status: 429, headers: { "Content-Type": "application/json", ...CORS } }
+      );
+    }
+
+    if (session_id && !UUID_RE.test(session_id)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid session_id" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS } }
+      );
+    }
+
+    if (typeof message !== "string" || message.trim().length === 0) {
+      return new Response(
+        JSON.stringify({ error: "Message must be a non-empty string" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS } }
+      );
+    }
+
+    if (message.length > 2000) {
+      return new Response(
+        JSON.stringify({ error: "Message exceeds 2000 character limit" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS } }
       );
     }
 
@@ -28,14 +83,14 @@ export async function POST(request: Request) {
     if (botErr || !bot) {
       return new Response(JSON.stringify({ error: "Invalid bot_key" }), {
         status: 404,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...CORS },
       });
     }
 
     if (bot.status !== "ready") {
       return new Response(
         JSON.stringify({ error: "Bot is not ready yet. Please crawl the website first." }),
-        { status: 422, headers: { "Content-Type": "application/json" } }
+        { status: 422, headers: { "Content-Type": "application/json", ...CORS } }
       );
     }
 
@@ -77,7 +132,7 @@ export async function POST(request: Request) {
           plan,
           limit: planConfig.chatsPerDay,
         }),
-        { status: 429, headers: { "Content-Type": "application/json" } }
+        { status: 429, headers: { "Content-Type": "application/json", ...CORS } }
       );
     }
 
@@ -104,7 +159,7 @@ export async function POST(request: Request) {
       if (sessionErr || !newSession) {
         return new Response(JSON.stringify({ error: "Session error" }), {
           status: 500,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...CORS },
         });
       }
       sessionDbId = newSession.id;
@@ -170,91 +225,226 @@ export async function POST(request: Request) {
     };
     const personality = personalityMap[bot.bot_personality ?? "professional"] ?? "helpful";
 
-    const systemPrompt = customSystemPrompt
-      ? `${customSystemPrompt}\n\nWEBSITE CONTENT:\n${contextText || "No relevant content found."}`
-      : `You are a ${personality} assistant for ${domainDisplay}.
-Your job is to answer customer questions based ONLY on the website content provided below.
+    // Response length → max_tokens
+    const maxTokens = response_length === "short" ? 150 : response_length === "detailed" ? 800 : 500;
 
-Guidelines:
-- Be concise and conversational — answer in 2-4 sentences when possible
-- If the answer is in the content, answer confidently and naturally
-- If the answer cannot be found in the content, say: "I'm not sure about that based on the website content. You might want to contact the team directly."
-- Never make up information not in the content
-${bot.bot_name_display ? `- You are "${bot.bot_name_display}"` : ""}
+    // Build system prompt
+    const toneAppend = tone_override && typeof tone_override === "string" && tone_override.trim()
+      ? `\n\nAdditional instructions: ${tone_override.trim()}`
+      : "";
+
+    const systemPrompt = customSystemPrompt
+      ? `${customSystemPrompt}${toneAppend}\n\nWEBSITE CONTENT:\n${contextText || "No content available for this query."}`
+      : `You are the ${personality} assistant for ${domainDisplay}. You help visitors get clear, helpful answers.
+
+Speak as part of the team — use "we", "our", and "us" naturally. You represent this business directly.
+
+RESPONSE STRUCTURE — always follow this format:
+
+## Summary
+- 1–3 bullet points that briefly answer the user's question or request.
+
+## Details
+- Use short paragraphs (2–4 sentences each).
+- Break information into clear subsections using headings like:
+  ### Explanation
+  ### Steps
+  ### Examples
+- Use **numbered lists** for step-by-step instructions.
+- Use **bullet lists** for unordered information (pros/cons, options, key points).
+- Wrap all code, commands, or config in fenced code blocks:
+  \`\`\`language
+  // code here
+  \`\`\`
+
+End with either:
+## Next Steps
+- Bullet list of what the user should do next
+
+OR (when more appropriate):
+## Key Takeaways
+- Bullet list of the most important points.
+
+CLARITY RULES:
+- NEVER write a wall-of-text paragraph. No single paragraph longer than 4 sentences.
+- Prefer several small sections over one long block.
+- Use **bold** sparingly — only for important terms, warnings, or key facts.
+- Simple factual answers (e.g. "What are your hours?") → use just ## Summary with 1–2 bullets. Skip ## Details.
+- Complex or multi-part questions → full structure with ## Summary + ## Details + ## Next Steps.
+
+CONTENT RULES:
+- Never say "based on the website", "it appears", "according to the content", "as an AI", or similar phrases
+- Do not reveal that you crawled or analyzed any content — just answer naturally
+- Never invent pricing, policies, or facts not in the content below
+- If you don't have the answer: respond naturally and guide to the next step (e.g. "That's best answered by our team directly — feel free to reach out.")
+- Encourage contact or next-step actions where appropriate, without being pushy
+${bot.bot_name_display ? `- Your name is "${bot.bot_name_display}"` : ""}
+${response_length === "short" ? "- Keep responses very concise — ## Summary only, 1–2 bullets max" : response_length === "detailed" ? "- Provide thorough, detailed explanations — use full ## Summary + ## Details + ## Next Steps structure" : ""}
 
 WEBSITE CONTENT:
-${contextText || "No relevant content found."}`;
+${contextText || "No content available for this query."}${toneAppend}`;
 
     // 9. Stream response
     const encoder = new TextEncoder();
-    let fullAnswer = "";
+    const llmMessages = [
+      { role: "system" as const, content: systemPrompt },
+      ...conversationHistory,
+      { role: "user" as const, content: message },
+    ];
+
+    async function saveAndFinish(controller: ReadableStreamDefaultController, fullAnswer: string) {
+      await db.from("messages").insert([
+        { chat_session_id: sessionDbId, role: "user", content: message },
+        { chat_session_id: sessionDbId, role: "assistant", content: fullAnswer },
+      ]);
+      const [botRpc, userRpc] = await Promise.all([
+        db.rpc("increment_bot_chat_count", { bot_id_input: bot.id }),
+        db.rpc("increment_user_chat_count", { user_id_input: bot.user_id }),
+      ]);
+      if (botRpc.error) await db.from("bots").update({ daily_chat_count: bot.daily_chat_count + 1 }).eq("id", bot.id);
+      if (userRpc.error) await db.from("user_profiles").update({ daily_chat_count: dailyCount + 1 }).eq("id", bot.user_id);
+      if (citations.length > 0) {
+        for (const citation of citations) {
+          try { await db.rpc("increment_citation_count", { page_id_input: citation.pageId }); } catch { /* skip */ }
+        }
+      }
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, session_id: sid, citations: citations.map(({ url, title }) => ({ url, title })) })}\n\n`));
+    }
+
+    async function streamGroq(controller: ReadableStreamDefaultController): Promise<string> {
+      const completion = await openai.chat.completions.create({
+        model: CHAT_MODEL,
+        messages: llmMessages,
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        stream: true,
+      });
+      let fullAnswer = "";
+      for await (const chunk of completion) {
+        const text = chunk.choices[0]?.delta?.content || "";
+        if (text) {
+          fullAnswer += text;
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: text })}\n\n`));
+        }
+      }
+      return fullAnswer;
+    }
+
+    async function streamGemini(controller: ReadableStreamDefaultController): Promise<string> {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
+      const contents = [
+        ...conversationHistory.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }],
+        })),
+        { role: "user", parts: [{ text: message }] },
+      ];
+      const body = JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { maxOutputTokens: 600, temperature: 0.3 },
+      });
+      // Try Gemini models in order; retry once per model on 429
+      const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
+      for (const model of models) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+          if (res.status === 429) {
+            if (attempt === 0) { await new Promise((r) => setTimeout(r, 3000)); continue; }
+            break; // try next model
+          }
+          if (!res.ok) break;
+          const reader = res.body!.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let fullAnswer = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const json = line.slice(6).trim();
+              if (!json) continue;
+              try {
+                const data = JSON.parse(json);
+                const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                if (text) {
+                  fullAnswer += text;
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: text })}\n\n`));
+                }
+              } catch { /* ignore parse errors */ }
+            }
+          }
+          return fullAnswer;
+        }
+      }
+      // Last resort: OpenAI gpt-4o-mini (paid, ~$0.001/conversation)
+      const oaiKey = process.env.OPENAI_API_KEY;
+      if (oaiKey) {
+        const oaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${oaiKey}` },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: llmMessages,
+            max_tokens: maxTokens,
+            temperature: 0.3,
+            stream: true,
+          }),
+        });
+        if (oaiRes.ok) {
+          const reader = oaiRes.body!.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let fullAnswer = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
+              const json = line.slice(6).trim();
+              if (!json) continue;
+              try {
+                const data = JSON.parse(json);
+                const text: string = data.choices?.[0]?.delta?.content || "";
+                if (text) {
+                  fullAnswer += text;
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: text })}\n\n`));
+                }
+              } catch { /* ignore parse errors */ }
+            }
+          }
+          return fullAnswer;
+        }
+      }
+      throw new Error("All AI providers are temporarily busy. Please try again in a moment.");
+    }
 
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const completion = await openai.chat.completions.create({
-            model: CHAT_MODEL,
-            messages: [
-              { role: "system", content: systemPrompt },
-              ...conversationHistory,
-              { role: "user", content: message },
-            ],
-            max_tokens: 600,
-            temperature: 0.3,
-            stream: true,
-          });
-
-          for await (const chunk of completion) {
-            const text = chunk.choices[0]?.delta?.content || "";
-            if (text) {
-              fullAnswer += text;
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ chunk: text })}\n\n`)
-              );
-            }
+          let fullAnswer: string;
+          try {
+            fullAnswer = await streamGroq(controller);
+          } catch (groqErr) {
+            const msg = groqErr instanceof Error ? groqErr.message : "";
+            const isRateLimit = msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("tokens per day") || msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("exceeded");
+            if (!isRateLimit || !process.env.GEMINI_API_KEY) throw groqErr;
+            // Silent fallback — user sees no interruption
+            fullAnswer = await streamGemini(controller);
           }
-
-          // Save messages to DB
-          await db.from("messages").insert([
-            { chat_session_id: sessionDbId, role: "user", content: message },
-            { chat_session_id: sessionDbId, role: "assistant", content: fullAnswer },
-          ]);
-
-          // Increment per-bot count (analytics) + per-user count (quota)
-          await Promise.all([
-            db.from("bots")
-              .update({ daily_chat_count: bot.daily_chat_count + 1 })
-              .eq("id", bot.id),
-            db.from("user_profiles")
-              .update({ daily_chat_count: dailyCount + 1 })
-              .eq("id", bot.user_id),
-          ]);
-
-          // Increment citation counts
-          if (citations.length > 0) {
-            for (const citation of citations) {
-              try {
-                await db.rpc("increment_citation_count", { page_id_input: citation.pageId });
-              } catch {
-                // RPC not available; skip
-              }
-            }
-          }
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                done: true,
-                session_id: sid,
-                citations: citations.map(({ url, title }) => ({ url, title })),
-              })}\n\n`
-            )
-          );
+          await saveAndFinish(controller, fullAnswer);
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`)
-          );
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`));
         } finally {
           controller.close();
         }
@@ -267,13 +457,14 @@ ${contextText || "No relevant content found."}`;
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
+        ...CORS,
       },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...CORS },
     });
   }
 }
@@ -288,7 +479,14 @@ export async function GET(request: Request) {
     if (!bot_key || !session_id) {
       return new Response(
         JSON.stringify({ error: "bot_key and session_id required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS } }
+      );
+    }
+
+    if (!UUID_RE.test(session_id)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid session_id" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...CORS } }
       );
     }
 
@@ -300,7 +498,7 @@ export async function GET(request: Request) {
       .eq("bot_key", bot_key)
       .single();
 
-    if (!bot) return Response.json({ messages: [] });
+    if (!bot) return Response.json({ messages: [] }, { headers: CORS });
 
     const { data: session } = await db
       .from("chat_sessions")
@@ -309,7 +507,7 @@ export async function GET(request: Request) {
       .eq("session_id", session_id)
       .single();
 
-    if (!session) return Response.json({ messages: [] });
+    if (!session) return Response.json({ messages: [] }, { headers: CORS });
 
     const { data: messages } = await db
       .from("messages")
@@ -317,12 +515,12 @@ export async function GET(request: Request) {
       .eq("chat_session_id", session.id)
       .order("created_at", { ascending: true });
 
-    return Response.json({ messages: messages || [] });
+    return Response.json({ messages: messages || [] }, { headers: CORS });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...CORS },
     });
   }
 }
